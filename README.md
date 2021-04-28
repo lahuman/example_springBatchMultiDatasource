@@ -1,7 +1,44 @@
 
 # SpringBatch에서 Mutlti datasource 설정
 
-> 회사내에서 배치 작업을 잠시 하게 되었습니다. 오랜만에 자바를 사용해보는거라 재미있네요. 스프링 설정은 이젠 javaconfig 만으로 웬만한 설정은 다 할수 있습니다.
+> 회사 내에서 배치 작업을 잠시 하게 되었습니다. 오랜만에 자바를 사용해보는 거라 재미있네요. 스프링 설정은 이젠 javaconfig 만으로 웬만한 설정은 다 할 수 있습니다.
+
+## 실패하는 Step 추가(2021.04.28)
+
+실패하는 Step을 추가하여 Job을 실패로 종료하도록 처리 하는 코드를 추가 하였습니다.
+
+```java
+// BachConfiguration
+    @Bean
+    public Step failStep() {
+        return stepBuilderFactory.get("failStep")
+                .tasklet((contribution, chunkContext) -> {
+                    /**
+                     ExitStatus를 FAILED로 지정한다.
+                     해당 status를 보고 flow가 진행된다.
+                     **/
+                    contribution.setExitStatus(ExitStatus.FAILED);
+                    return RepeatStatus.FINISHED;
+                })
+                .build();
+    }
+
+
+
+   @Bean
+   public Job importUserJob(JobCompletionNotificationListener listener, Step step1, Step failStep) {
+        return jobBuilderFactory.get("importUserJob")
+        .incrementer(new RunIdIncrementer())
+        .listener(listener)
+        .flow(step1)
+        .next(failStep)
+            .on("FAILED") // 실패이 경우 
+            .fail() // 실패로 종료 
+        .end()
+        .build();
+    }
+
+```
 
 **추가 정보 : 스프링 배치에 대한 문서는 토리맘님의 한글 라이즈 프로젝트에 한글로 번역된 문서가 있습니다.**
 - [Spring Batch Introduction](https://godekdls.github.io/Spring%20Batch/introduction/)
