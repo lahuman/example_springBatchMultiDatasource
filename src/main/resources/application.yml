@@ -1,33 +1,23 @@
 spring:
-  profiles:
-    active: local
+  application:
+    name: spring-batch-multi-datasource
   main:
     web-application-type: none
----
-spring:
-  profiles: local
+  batch:
+    jdbc:
+      initialize-schema: always
+
+app:
+  data-directory: ./data
   datasource:
-    work:
-      jdbc-url: jdbc:mysql://10.52.181.241:31003/spring_batch
-      username: spring
-      password: Batch!!
-      driver-class-name: com.mysql.cj.jdbc.Driver
-    default:
-      jdbc-url: jdbc:h2:mem:springdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    batch:
+      url: jdbc:h2:file:./data/batch-meta;AUTO_SERVER=TRUE
       username: sa
-      password:
+      password: ""
       driver-class-name: org.h2.Driver
----
-spring:
-  profiles: test
-  datasource:
-    work:
-      jdbc-url: jdbc:mysql://10.52.181.241:31003/spring_batch
-      username: spring
-      password: Batch!!
-      driver-class-name: com.mysql.jdbc.Driver
-    default:
-      jdbc-url: jdbc:h2:mem:springdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-      username: sa
-      password:
-      driver-class-name: org.h2.Driver
+    business:
+      url: jdbc:sqlite:./data/business.db
+      driver-class-name: org.sqlite.JDBC
+
+demo:
+  failure: false
