@@ -1,36 +1,37 @@
 plugins {
-	id 'org.springframework.boot' version '2.4.3'
-	id 'io.spring.dependency-management' version '1.0.11.RELEASE'
-	id 'java'
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
 }
 
 group = 'com.gsshop'
-version = '0.0.1-SNAPSHOT'
-sourceCompatibility = '1.8'
+version = '1.0.0-SNAPSHOT'
 
-configurations {
-	compileOnly {
-		extendsFrom annotationProcessor
-	}
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }
 
 repositories {
-	mavenCentral()
+    mavenCentral()
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-batch'
-	implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	compileOnly 'org.projectlombok:lombok'
-	runtimeOnly 'com.h2database:h2'
-	runtimeOnly 'com.oracle.database.jdbc:ojdbc8'
-	runtimeOnly 'mysql:mysql-connector-java'
-	annotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testImplementation 'org.springframework.batch:spring-batch-test'
+    implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+    implementation 'org.springframework.boot:spring-boot-starter-batch-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+
+    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'org.xerial:sqlite-jdbc:3.53.2.0'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-batch-test'
 }
 
-test {
-	useJUnitPlatform()
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
 }
