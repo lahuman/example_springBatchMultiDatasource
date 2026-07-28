@@ -4,6 +4,7 @@ import javax.sql.DataSource;
 
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.job.builder.SimpleJobBuilder;
 import org.springframework.batch.core.job.parameters.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
@@ -13,6 +14,7 @@ import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchI
 import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
 import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
@@ -73,14 +75,32 @@ public class PersonImportJobConfiguration {
     }
 
     @Bean
+    Step failureDemoStep(
+            JobRepository jobRepository,
+            @Qualifier("businessTransactionManager") PlatformTransactionManager transactionManager) {
+        return new StepBuilder("failureDemoStep", jobRepository)
+                .tasklet((contribution, chunkContext) -> {
+                    throw new IllegalStateException(
+                            "Intentional failure requested by demo.failure");
+                })
+                .transactionManager(transactionManager)
+                .build();
+    }
+
+    @Bean
     Job personImportJob(
             JobRepository jobRepository,
             Step importPeopleStep,
-            JobCompletionNotificationListener listener) {
-        return new JobBuilder("personImportJob", jobRepository)
+            Step failureDemoStep,
+            JobCompletionNotificationListener listener,
+            @Value("${demo.failure:false}") boolean failureEnabled) {
+        SimpleJobBuilder jobBuilder = new JobBuilder("personImportJob", jobRepository)
                 .incrementer(new RunIdIncrementer())
                 .listener(listener)
-                .start(importPeopleStep)
-                .build();
+                .start(importPeopleStep);
+        if (failureEnabled) {
+            jobBuilder = jobBuilder.next(failureDemoStep);
+        }
+        return jobBuilder.build();
     }
 }

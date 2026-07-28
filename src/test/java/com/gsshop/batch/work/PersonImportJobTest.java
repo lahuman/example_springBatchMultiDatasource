@@ -26,6 +26,10 @@ class PersonImportJobTest extends BatchIntegrationTestSupport {
     @Qualifier("businessJdbcTemplate")
     private JdbcTemplate businessJdbcTemplate;
 
+    @Autowired
+    @Qualifier("batchJdbcTemplate")
+    private JdbcTemplate batchJdbcTemplate;
+
     @Test
     void importsFiveUppercasePeople() throws Exception {
         JobExecution execution = jobOperatorTestUtils.startJob(
@@ -37,5 +41,24 @@ class PersonImportJobTest extends BatchIntegrationTestSupport {
         List<String> firstNames = businessJdbcTemplate.queryForList(
                 "SELECT first_name FROM people ORDER BY person_id", String.class);
         assertThat(firstNames).containsExactly("JILL", "JOE", "JUSTIN", "JANE", "JOHN");
+    }
+
+    @Test
+    void repeatedInstancesKeepFiveBusinessRowsAndAddBatchHistory() throws Exception {
+        int executionCountBefore = batchJdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Integer.class);
+
+        JobExecution first = jobOperatorTestUtils.startJob(
+                jobOperatorTestUtils.getUniqueJobParameters());
+        JobExecution second = jobOperatorTestUtils.startJob(
+                jobOperatorTestUtils.getUniqueJobParameters());
+
+        assertThat(first.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(second.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(businessJdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM people", Integer.class)).isEqualTo(5);
+        assertThat(batchJdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Integer.class))
+                .isEqualTo(executionCountBefore + 2);
     }
 }
