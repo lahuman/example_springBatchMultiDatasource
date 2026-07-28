@@ -5,7 +5,6 @@ import javax.sql.DataSource;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.job.builder.SimpleJobBuilder;
-import org.springframework.batch.core.job.parameters.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
@@ -95,7 +94,6 @@ public class PersonImportJobConfiguration {
             JobCompletionNotificationListener listener,
             @Value("${demo.failure:false}") boolean failureEnabled) {
         SimpleJobBuilder jobBuilder = new JobBuilder("personImportJob", jobRepository)
-                .incrementer(new RunIdIncrementer())
                 .listener(listener)
                 .start(importPeopleStep);
         if (failureEnabled) {

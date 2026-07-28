@@ -8,6 +8,7 @@ import com.gsshop.batch.support.BatchIntegrationTestSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.test.JobOperatorTestUtils;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,5 +61,15 @@ class PersonImportJobTest extends BatchIntegrationTestSupport {
         assertThat(batchJdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Integer.class))
                 .isEqualTo(executionCountBefore + 2);
+    }
+
+    @Test
+    void preservesTheCallerSuppliedRunId() throws Exception {
+        JobExecution execution = jobOperatorTestUtils.startJob(
+                new JobParametersBuilder()
+                        .addLong("run.id", 101L)
+                        .toJobParameters());
+
+        assertThat(execution.getJobParameters().getLong("run.id")).isEqualTo(101L);
     }
 }

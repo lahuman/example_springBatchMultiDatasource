@@ -668,9 +668,11 @@ return new StepBuilder("importPeopleStep", jobRepository)
         .build();
 ```
 
-Construct `personImportJob` with `JobBuilder`, `RunIdIncrementer`, the
-completion listener, and `importPeopleStep`. At this task, the default
-`demo.failure=false` path contains only the import Step.
+Construct `personImportJob` with `JobBuilder`, the completion listener, and
+`importPeopleStep`. Do not attach a `RunIdIncrementer`: Spring Batch 6's
+`JobOperator` ignores caller-supplied parameters when an incrementer is
+present, while this example's CLI requires an explicit unique `run.id`. At
+this task, the default `demo.failure=false` path contains only the import Step.
 
 - [ ] **Step 5: Replace the listener**
 
