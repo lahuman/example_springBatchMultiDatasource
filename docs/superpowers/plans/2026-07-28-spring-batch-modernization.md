@@ -978,7 +978,7 @@ updates:
 Run:
 
 ```bash
-git grep -n -E '10[.]52[.]181[.]241|Batch!!|mysql://|oracle:thin'
+git grep -n -E '[1]0[.]52[.]181[.]241|Batch[!][!]|mysql[:]//|oracle[:]thin'
 ```
 
 Expected: no output. Do not rewrite Git history in this task. Record in the
@@ -1060,7 +1060,7 @@ five.
 ```bash
 GRADLE_USER_HOME=/tmp/spring-batch-modernization-gradle ./gradlew dependencyInsight --dependency spring-batch-core --configuration runtimeClasspath
 GRADLE_USER_HOME=/tmp/spring-batch-modernization-gradle ./gradlew dependencyInsight --dependency sqlite-jdbc --configuration runtimeClasspath
-git grep -n -E '10[.]52[.]181[.]241|Batch!!|mysql://|oracle:thin'
+git grep -n -E '[1]0[.]52[.]181[.]241|Batch[!][!]|mysql[:]//|oracle[:]thin'
 shasum -a 256 gradle/wrapper/gradle-wrapper.jar
 ```
 

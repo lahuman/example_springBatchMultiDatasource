@@ -1,388 +1,182 @@
+# Spring Batch Multi-Datasource 101
 
-# SpringBatch에서 Mutlti datasource 설정
+This is a small, production-minded Spring Batch 6 example that keeps Batch
+metadata in an H2 file database and business data in a SQLite file database.
+It requires no external database installation and demonstrates explicit data
+source boundaries, repeatable imports, isolated tests, and an opt-in failure
+scenario.
 
-> 회사 내에서 배치 작업을 잠시 하게 되었습니다. 오랜만에 자바를 사용해보는 거라 재미있네요. 스프링 설정은 이젠 javaconfig 만으로 웬만한 설정은 다 할 수 있습니다.
+## Quick start
 
-## 실패하는 Step 추가(2021.04.28)
+JDK 21 is required. From the project root:
 
-실패하는 Step을 추가하여 Job을 실패로 종료하도록 처리 하는 코드를 추가 하였습니다.
-
-```java
-// BachConfiguration
-    @Bean
-    public Step failStep() {
-        return stepBuilderFactory.get("failStep")
-                .tasklet((contribution, chunkContext) -> {
-                    /**
-                     ExitStatus를 FAILED로 지정한다.
-                     해당 status를 보고 flow가 진행된다.
-                     **/
-                    contribution.setExitStatus(ExitStatus.FAILED);
-                    return RepeatStatus.FINISHED;
-                })
-                .build();
-    }
-
-
-
-   @Bean
-   public Job importUserJob(JobCompletionNotificationListener listener, Step step1, Step failStep) {
-        return jobBuilderFactory.get("importUserJob")
-        .incrementer(new RunIdIncrementer())
-        .listener(listener)
-        .flow(step1)
-        .next(failStep)
-            .on("FAILED") // 실패이 경우 
-            .fail() // 실패로 종료 
-        .end()
-        .build();
-    }
-
+```bash
+./gradlew clean test
+mkdir -p data
+./gradlew bootRun --args='run.id=1,java.lang.Long,true'
 ```
 
-**추가 정보 : 스프링 배치에 대한 문서는 토리맘님의 한글 라이즈 프로젝트에 한글로 번역된 문서가 있습니다.**
-- [Spring Batch Introduction](https://godekdls.github.io/Spring%20Batch/introduction/)
+The Job finishes with `COMPLETED`, creates database files below `./data/`, and
+keeps five uppercase people in SQLite.
 
-## [spring initializr](https://start.spring.io/)를 활용한 프로젝트 생성
-SpringBatch의 초기 프로젝트를 [spring initializr](https://start.spring.io/)에서 생성 합니다.
+## 프로젝트 목적
 
-제가 준 옵션은 아래와 같습니다.
+이 저장소는 외부 DB 서버 없이 서로 다른 DBMS를 사용하는 Spring Batch
+멀티 데이터소스 구성을 학습하고 검증하기 위한 예제입니다.
 
-![](./springbatch_initializr.png)
+- Spring Batch 메타데이터: H2 파일 DB
+- 업무 데이터: SQLite 파일 DB
+- 입력: classpath의 CSV 5건
+- 처리: 이름 유효성 검사 및 `Locale.ROOT` 기준 대문자 변환
+- 출력: 재실행에 안전한 SQLite upsert
+- 테스트: 매번 임시 디렉터리의 파일 DB 사용
 
-Gradle을 사용하고, Jdk는 1.8을 지정하였습니다.
-Mysql은 Spring Batch의 Meta데이터를 저장하는 용도이며, H2 DB는 개발용으로, Oracle는 배치 데이터의 조회 & 적재용으로 사용하게 됩니다.
-개발툴은 intellij 기준으로 진행합니다.
+필요한 것은 JDK 21뿐입니다. 별도의 Gradle이나 DBMS를 설치하지 말고
+저장소에 포함된 Gradle Wrapper를 사용하세요.
 
-## 초기 환경 구성 진행
+## 처리 구조
 
-1. [spring initializr](https://start.spring.io/) 에서 프로젝트 정보를 입력하고 생성 & 다운로드합니다.
+```mermaid
+flowchart LR
+    CSV["sample-data.csv"] --> R["FlatFileItemReader"]
+    R --> P["PersonItemProcessor<br/>검증 + 대문자 변환"]
+    P --> W["JdbcBatchItemWriter<br/>SQLite upsert"]
+    W --> S[("SQLite<br/>./data/business.db")]
 
-2. 다운로드한 파일의 압축을 풉니다.
-3. intellij에서 open 을 선택하고 압축 푼 디렉토리를 선택합니다.
-   ![](./springbatch_intellij_open.png)
-4. Gradle에서 관련 모듈 다운로드가 완료되기를 기다립니다.
-
-## Spring Batch 설정
-
-> 기본적인 Spring Batch에 대한 내용은 [Spring Batch Introduction](https://godekdls.github.io/Spring%20Batch/introduction/)을 읽어보시기를 권장합니다.
-
-![](./spring-batch-reference-model.png)
-
-Spring Batch는 Job, Step, 사용자가 개발하는 처리 유닛으로 나누어져 있습니다. 이렇게 구현함으로 다음과 같은 장점을 얻을 수 있습니다.
-
-- 명확한 관심사 분리
-- 인터페이스로 제공하는 명확한 아키텍처 레이어와 서비스
-- 빠르게 적용하고 쉽게 응용할 수 있는 간단한 디폴트 구현체
-- 크게 향상된 확장성
-
-### [Creating a Batch Service](https://spring.io/guides/gs/batch-processing/)를 기준으로 코드를 작성 할 예정입니다.
-
-```src/main/resources/sample-data.cvs```에 아래 내용을 작성하고 저장합니다.
-
-```
-Jill,Doe
-Joe,Doe
-Justin,Doe
-Jane,Doe
-John,Doe
+    J["personImportJob / importPeopleStep"] --> M[("H2<br/>./data/batch-meta.mv.db")]
+    M -. "Job/Step 실행 이력" .-> J
 ```
 
-데이터가 적재될 table을 생성하는 스크립트를 ```src/main/resources/schema-all.sql```에 아래 내용을 작성하고 저장합니다.
+JobRepository의 트랜잭션과 업무 쓰기의 트랜잭션은 명시적으로 분리되어
+있습니다.
 
-```sql
-DROP TABLE people IF EXISTS;
+| 역할 | Bean | 데이터베이스 | 트랜잭션 매니저 |
+|---|---|---|---|
+| Batch 메타데이터 | `batchDataSource` (`@BatchDataSource`) | H2 file | `batchTransactionManager` (`@BatchTransactionManager`) |
+| 업무 데이터 | `businessDataSource` (`@Primary`) | SQLite file | `businessTransactionManager` (`@Primary`) |
 
-CREATE TABLE people  (
-    person_id BIGINT IDENTITY NOT NULL PRIMARY KEY,
-    first_name VARCHAR(20),
-    last_name VARCHAR(20)
-);
+`importPeopleStep`은 반드시 `businessTransactionManager`를 사용합니다.
+Spring Boot의 Batch 자동 구성은 별도로 표시된 H2 데이터소스와 트랜잭션
+매니저를 사용해 JobRepository를 구성합니다.
+
+## 실행 시나리오
+
+### 정상 실행
+
+```bash
+./gradlew bootRun --args='run.id=1,java.lang.Long,true'
 ```
 
-> Spring Boot는 ```schema-@@platform@@.sql``` 파일을 시작시 실행합니다. ```-all```은 모든 플랫폼을 의미합니다.
+로그에서 Job 상태 `COMPLETED`와 업무 데이터 5건을 확인할 수 있습니다.
 
-저장 데이터 구조가 되는 ```Person.java```를 생성합니다.
+### 다른 Job 인스턴스로 재실행
 
-```java
-package com.gsshop.batch.work;
-
-public class Person {
-
-    private String lastName;
-    private String firstName;
-
-    public Person() {
-    }
-
-    public Person(String firstName, String lastName) {
-        this.firstName = firstName;
-        this.lastName = lastName;
-    }
-
-    public void setFirstName(String firstName) {
-        this.firstName = firstName;
-    }
-
-    public String getFirstName() {
-        return firstName;
-    }
-
-    public String getLastName() {
-        return lastName;
-    }
-
-    public void setLastName(String lastName) {
-        this.lastName = lastName;
-    }
-
-    @Override
-    public String toString() {
-        return "firstName: " + firstName + ", lastName: " + lastName;
-    }
-
-}
+```bash
+./gradlew bootRun --args='run.id=2,java.lang.Long,true'
 ```
 
-데이터를 받아서 대문자로 처리 하는 PersonItemProcessor을 생성합니다.
+H2에는 새로운 Job 실행 이력이 추가되지만 SQLite의 업무 데이터는 계속
+5건입니다.
 
-```java
-package com.gsshop.batch.work;
+### 의도적 실패 데모
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.springframework.batch.item.ItemProcessor;
-
-public class PersonItemProcessor implements ItemProcessor<Person, Person> {
-
-    private static final Logger log = LoggerFactory.getLogger(PersonItemProcessor.class);
-
-    @Override
-    public Person process(final Person person) throws Exception {
-        final String firstName = person.getFirstName().toUpperCase();
-        final String lastName = person.getLastName().toUpperCase();
-
-        final Person transformedPerson = new Person(firstName, lastName);
-
-        log.info("Converting (" + person + ") into (" + transformedPerson + ")");
-
-        return transformedPerson;
-    }
-
-}
+```bash
+./gradlew bootRun --args='--demo.failure=true run.id=3,java.lang.Long,true'
 ```
 
-작업에 대한 처리가 완료 되었을대 확인이 가능한 리스너를 제작합니다.
-해당 리스너의 역할은 단순히 작업이 완료 되었을 경우 저장된 데이터를 출력하게 됩니다.
+기본값은 `demo.failure=false`입니다. 옵션을 켜면 import가 끝난 뒤
+`failureDemoStep`이 `Intentional failure requested by demo.failure` 예외를
+발생시키며 Job 상태가 `FAILED`가 됩니다. Spring Boot 애플리케이션 자체는
+정상 종료할 수 있으므로 Gradle의 `BUILD SUCCESSFUL`이 아니라 Job 상태
+로그를 확인하세요.
 
-```java
-package com.gsshop.batch.work;
+## 재실행과 트랜잭션 경계
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.listener.JobExecutionListenerSupport;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
+SQLite writer는 `(first_name, last_name)` 유니크 키에 대해
+`INSERT ... ON CONFLICT ... DO UPDATE`를 사용합니다. 따라서 서로 다른
+Job 파라미터로 같은 CSV를 여러 번 처리해도 업무 행이 중복되지 않습니다.
 
-@Component
-public class JobCompletionNotificationListener extends JobExecutionListenerSupport {
+이 예제는 두 로컬 DBMS가 하나의 원자적 트랜잭션에 참여한다고 가정하지
+않습니다. H2의 Batch 메타데이터 트랜잭션과 SQLite의 chunk 트랜잭션은
+독립적입니다. 실제 시스템에서도 재시도 가능한 writer, 멱등 키, 보상 처리
+등을 설계해야 하며 이 예제의 upsert가 그 최소 패턴을 보여줍니다.
 
-    private static final Logger log = LoggerFactory.getLogger(JobCompletionNotificationListener.class);
+## 로컬 데이터 초기화
 
-    private final JdbcTemplate jdbcTemplate;
+애플리케이션이 종료된 상태에서 프로젝트의 `./data/` 바로 아래 파일만
+삭제합니다.
 
-    @Autowired
-    public JobCompletionNotificationListener(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    @Override
-    public void afterJob(JobExecution jobExecution) {
-        if(jobExecution.getStatus() == BatchStatus.COMPLETED) {
-            log.info("!!! JOB FINISHED! Time to verify the results");
-
-            jdbcTemplate.query("SELECT first_name, last_name FROM people",
-                    (rs, row) -> new Person(
-                            rs.getString(1),
-                            rs.getString(2))
-            ).forEach(person -> log.info("Found <" + person + "> in the database."));
-        }
-    }
-}
+```bash
+find ./data -mindepth 1 -maxdepth 1 -type f -delete
 ```
 
+`data/`는 Git에서 제외됩니다. 테스트는 이 디렉터리를 사용하지 않고 OS의
+임시 디렉터리에 각각 H2와 SQLite 파일을 생성합니다.
 
-Batch의 시작점인 BatchConfiguration을 작성합니다. 해당 내용에는 reader, processor, writer, 조립 설정 등이 포함 됩니다.
+## 2021 코드에서 현재 구조로의 변화
 
-```java
-package com.gsshop.batch.work;
+| 항목 | 기존 | 현재 |
+|---|---|---|
+| Java | 8 | 21 |
+| Spring Boot | 2.4.x | 4.1.0 |
+| Spring Batch | 4.x | 6.0.4 |
+| Spring Framework | 5.x | 7.0.8 |
+| Gradle Wrapper | 6.8.2 | 9.6.1 |
+| 도메인 모델 | mutable JavaBean | immutable `record` |
+| Builder 구성 | `JobBuilderFactory` / `StepBuilderFactory` | `JobRepository` 기반 Builder |
+| Item API | `org.springframework.batch.item` | `org.springframework.batch.infrastructure.item` |
+| 업무 저장소 | 외부 DB 접속 정보 | 로컬 SQLite 파일 |
+| Batch 저장소 | 외부 DB | 로컬 H2 파일 |
+| 반복 실행 | 중복 가능 | 유니크 키 기반 upsert |
+| 실패 예제 | ExitStatus 수동 변경 | 명시적 예외와 실제 `FAILED` 상태 |
 
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
-import org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider;
-import org.springframework.batch.item.database.JdbcBatchItemWriter;
-import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
-import org.springframework.batch.item.file.FlatFileItemReader;
-import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
-import org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.core.io.ClassPathResource;
+의존성 잠금 파일 `gradle.lockfile`도 함께 관리하여 같은 소스에서 재현 가능한
+버전을 사용합니다.
 
-import javax.sql.DataSource;
+## 문제 해결
 
-@Configuration
-@EnableBatchProcessing
-public class BatchConfiguration {
-    @Autowired
-    public JobBuilderFactory jobBuilderFactory;
-    @Autowired
-    public StepBuilderFactory stepBuilderFactory;
+### Java 또는 class file 버전 오류
 
-    @Bean
-    public FlatFileItemReader<Person> reader() {
-        return new FlatFileItemReaderBuilder<Person>()
-                .name("personItemReader")
-                .resource(new ClassPathResource("sample-data.csv"))
-                .delimited()
-                .names(new String[]{"firstName", "lastName"})
-                .fieldSetMapper(new BeanWrapperFieldSetMapper<Person>() {{
-                    setTargetType(Person.class);
-                }})
-                .build();
-    }
-
-    @Bean
-    public PersonItemProcessor processor() {
-        return new PersonItemProcessor();
-    }
-
-    @Bean
-    public JdbcBatchItemWriter<Person> writer(DataSource dataSource) {
-        return new JdbcBatchItemWriterBuilder<Person>()
-                .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
-                .sql("INSERT INTO people (first_name, last_name) VALUES (:firstName, :lastName)")
-                .dataSource(dataSource)
-                .build();
-    }
-
-    @Bean
-    public Job importUserJob(JobCompletionNotificationListener listener, Step step1) {
-        return jobBuilderFactory.get("importUserJob")
-                .incrementer(new RunIdIncrementer())
-                .listener(listener)
-                .flow(step1)
-                .end()
-                .build();
-    }
-
-    @Bean
-    public Step step1(JdbcBatchItemWriter<Person> writer) {
-        return stepBuilderFactory.get("step1")
-                .<Person, Person> chunk(10)
-                .reader(reader())
-                .processor(processor())
-                .writer(writer)
-                .build();
-    }
-}
+```bash
+java -version
+./gradlew --version
 ```
 
-여기까지 설정하고 실행하면 잘 동작하는 것을 확인 할 수 있습니다.
+두 명령 모두 Java 21을 가리켜야 합니다. 시스템 Gradle 대신 반드시
+`./gradlew`를 사용하세요.
 
-## Multi Datasoruce 설정
+### Database is already in use / locked
 
-Multi datasource는 springboot의  multi Datasource를 사용하는 것과 동일합니다.
+실행 중인 애플리케이션이나 IDE 프로세스를 먼저 종료한 뒤 다시 실행하세요.
+H2와 SQLite는 파일 DB이므로 다른 프로세스가 같은 파일을 열고 있으면 잠금
+오류가 날 수 있습니다.
 
-Datasource 생성을 하는 설정파일을 생성합니다.
+### Windows 경로와 명령
 
-```java
-package com.gsshop.batch.config;
+PowerShell에서는 `./gradlew` 대신 `.\gradlew.bat`를 사용할 수 있습니다.
+설정 파일의 JDBC URL에는 역슬래시보다 `/`를 권장합니다. 초기화는
+애플리케이션 종료 후 다음처럼 프로젝트의 `data` 내용만 삭제하세요.
 
-import com.zaxxer.hikari.HikariDataSource;
-import org.springframework.boot.autoconfigure.batch.BatchDataSource;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.jdbc.DataSourceBuilder;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-import org.springframework.data.transaction.ChainedTransactionManager;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.PlatformTransactionManager;
-
-import javax.sql.DataSource;
-
-@Configuration
-public class DatabaseConfig {
-    @Bean
-    @Primary
-    @ConfigurationProperties("spring.datasource.default")
-    DataSource springBatchDb(){
-        DataSourceBuilder builder = DataSourceBuilder.create();
-        builder.type(HikariDataSource.class);
-        return builder.build();
-    }
-
-    @Bean
-    @BatchDataSource
-    @ConfigurationProperties("spring.datasource.work")
-    DataSource workDb(){
-        DataSourceBuilder builder = DataSourceBuilder.create();
-        builder.type(HikariDataSource.class);
-        return builder.build();
-    }
-
-    // Transaction Setting
-
-    @Bean
-    PlatformTransactionManager springBatchTxManager() {
-        return new DataSourceTransactionManager(springBatchDb());
-    }
-
-    @Bean
-    PlatformTransactionManager workTxManager() {
-        return new DataSourceTransactionManager(workDb());
-    }
-
-    @Bean
-    PlatformTransactionManager chainTxManager() {
-        ChainedTransactionManager txManager = new ChainedTransactionManager(springBatchTxManager(), workTxManager());
-        return txManager;
-    }
-
-}
+```powershell
+Remove-Item -Path .\data\* -File
 ```
 
-- ```@Primary```는 기본으로 DatasSource를 이용할 경우 자동으로 주입되는 DataSource 입니다.
-- ```@BatchDataSource``` 는 SpringBatch의 Meta정보를 저장할 때 사용하는 DataSsource 입니다.
+## 보안
 
-특정 DataSource 사용할 경우 ```@Qualifier```를 이용합니다. 다음 예제를 확인하셔요.
+현재 소스 트리에는 외부 DB 주소나 비밀번호를 포함하지 않습니다. 다만
+Git에서 파일을 수정하거나 삭제하는 것만으로 과거 커밋의 자격 증명이
+사라지지는 않습니다. 이 저장소가 실제 자격 증명을 공개한 적이 있다면 해당
+계정을 즉시 폐기하거나 비밀번호를 교체하고, 필요 시 별도의 승인 절차로
+Git 이력을 정리해야 합니다.
 
-```java
-@Bean
-public JdbcBatchItemWriter<Person> writer(@Qualifier("workDb") DataSource dataSource) {
-    return new JdbcBatchItemWriterBuilder<Person>()
-            .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
-            .sql("INSERT INTO people (first_name, last_name) VALUES (:firstName, :lastName)")
-            .dataSource(dataSource)
-            .build();
-}
-```
+새로운 비밀값이나 개인 PC의 절대 DB 경로를 커밋하지 마세요.
 
-## 참고자료
+## 참고 문서
 
-- [Spring Batch Introduction](https://godekdls.github.io/Spring%20Batch/introduction/)
-- [spring initializr](https://start.spring.io/)
-- [Spring Batch 로 다중 Data Source 접근하기(매우 간단 주의)](https://medium.com/official-podo/spring-batch-%EB%A1%9C-%EB%8B%A4%EC%A4%91-data-source-%EC%A0%91%EA%B7%BC%ED%95%98%EA%B8%B0-%EB%A7%A4%EC%9A%B0-%EA%B0%84%EB%8B%A8-%EC%A3%BC%EC%9D%98-7332f2a5f7f8)
-- [12. Batch Applications](https://docs.spring.io/spring-boot/docs/current/reference/html/howto.html)
-- [Working With Spring Batch and Distributed Transaction](https://medium.com/swlh/working-with-spring-batch-and-distributed-transaction-772de2219e60)
-- [Creating a Batch Service](https://spring.io/guides/gs/batch-processing/)
+- [Spring Boot Reference Documentation](https://docs.spring.io/spring-boot/)
+- [Spring Batch Reference Documentation](https://docs.spring.io/spring-batch/reference/)
+- [Gradle User Manual](https://docs.gradle.org/current/userguide/userguide.html)
+- [H2 Database Documentation](https://h2database.com/html/main.html)
+- [Xerial SQLite JDBC](https://github.com/xerial/sqlite-jdbc)
+
+기여 방법은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
